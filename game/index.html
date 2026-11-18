@@ -1,19 +1,43 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Block Dodger</title>
+<title>Solmar Bay — Heat, chrome, and second chances on the coast</title>
 <style>
-  html, body { margin: 0; height: 100%; overflow: hidden; background: #11141b; }
-  #game { position: fixed; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; }
-  /* Read aloud, never shown: the status line screen readers announce. */
-  #status { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+  html, body { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background: #1a2230; font-family: Arial, Helvetica, sans-serif; }
+  #game-canvas { display: block; width: 100vw; height: 100vh; }
+  #hud { position: fixed; inset: 0; pointer-events: none; color: #fff; text-shadow: 0 1px 3px rgba(0,0,0,0.8); }
+  #hud button { pointer-events: auto; }
+  .hud-minimap { position: absolute; top: 14px; left: 14px; width: 180px; height: 180px; border-radius: 50%; }
+  .hud-stars { position: absolute; top: 200px; left: 20px; font-size: 26px; letter-spacing: 4px; }
+  .hud-objective { position: absolute; top: 14px; left: 50%; transform: translateX(-50%); font-size: 18px; font-weight: bold; background: rgba(0,0,0,0.45); padding: 6px 14px; border-radius: 6px; }
+  .hud-location { position: absolute; top: 14px; right: 16px; font-size: 16px; text-align: right; background: rgba(0,0,0,0.45); padding: 8px 12px; border-radius: 6px; }
+  .hud-status { position: absolute; left: 16px; bottom: 16px; font-size: 16px; background: rgba(0,0,0,0.45); padding: 8px 12px; border-radius: 6px; }
+  .hud-status .bar { display: inline-block; width: 90px; height: 10px; background: #333; border-radius: 3px; overflow: hidden; vertical-align: middle; }
+  .hud-status .bar span { display: block; height: 100%; background: #e04040; }
+  .hud-vehicle { position: absolute; right: 16px; bottom: 16px; font-size: 16px; background: rgba(0,0,0,0.45); padding: 8px 12px; border-radius: 6px; }
+  .hud-prompt { position: absolute; left: 50%; bottom: 90px; transform: translateX(-50%); font-size: 17px; background: rgba(0,0,0,0.55); padding: 6px 14px; border-radius: 6px; }
+  .hud-prompt:empty{display:none}
+  .hud-toasts { position: absolute; top: 60px; right: 16px; font-size: 15px; }
+  .hud-title, .hud-pause, .hud-card { position: absolute; inset: 0; display: none; pointer-events: auto; text-align: center; background: rgba(10,16,24,0.55); padding-top: 18vh; }
+  .hud-title h1, .hud-pause h1, .hud-card h1 { font-size: 64px; letter-spacing: 8px; margin: 0 0 8px; color: #ffd23e; }
+  .hud-title p, .hud-pause p, .hud-card p { font-size: 18px; }
+  .hud-title .controls { font-size: 14px; color: #dfe8ee; }
+  .hud-title button, .hud-pause button, .hud-card button { font-size: 20px; padding: 10px 26px; margin: 6px; background: #ffb13e; border: none; border-radius: 6px; cursor: pointer; color: #201408; }
+  #splash { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; background: #1a2230; color: #ffd23e; font-size: 22px; z-index: 10; }
 </style>
+<script type="importmap">
+{ "imports": { "three": "./vendor/three/three.module.min.js" } }
+</script>
 </head>
 <body>
-<canvas id="game" aria-label="Block Dodger: move the paddle left and right to dodge falling blocks and catch coins"></canvas>
-<p id="status" role="status" aria-live="polite"></p>
-<script type="module" src="./src/main.js"></script>
+<div id="splash">Building Solmar Bay…</div>
+<canvas id="game-canvas"></canvas>
+<div id="hud"></div>
+<script type="module">
+import { initGame } from "./src/main.js";
+if (initGame()) document.getElementById("splash").remove();
+</script>
 </body>
 </html>
