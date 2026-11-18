@@ -1,112 +1,62 @@
-const keys = new Map();
-const pressed = new Set();
-let mouseDX = 0;
-let mouseDY = 0;
-let mouseDown = false;
-let rightDown = false;
-let wheelDelta = 0;
-let dragging = false;
-let lastDragX = 0;
-let lastDragY = 0;
-let locked = false;
-let attached = false;
-let padIndex = -1;
-function onKeyDown(e) {
-  if (e.repeat) return;
-  keys.set(e.code, true);
-  pressed.add(e.code);
-  if (e.code === "Space") e.preventDefault();
+// input.js — keyboard / mouse / gamepad intent. Poll-based: main.js reads
+// intent each tick; no per-frame allocations, no wall clock.
+const KEYS = {
+  KeyW: "up", KeyS: "down", KeyA: "left", KeyD: "right",
+  ShiftLeft: "sprint", ShiftRight: "sprint", Space: "jump",
+  KeyE: "interact", KeyR: "reload", KeyQ: "radio", KeyH: "horn",
+  KeyL: "lights", KeyM: "map", KeyV: "recenter", KeyC: "cam",
+  Escape: "pause", Enter: "advance", Digit1: "w1", Digit2: "w2", Digit3: "w3",
+};
+export function createInput(canvas) {
+  const down = new Set(), hit = new Set();
+  let lookX = 0, lookY = 0, locked = false, dragging = false, lx = 0, ly = 0;
+  const onKey = e => {
+    const k = KEYS[e.code];
+    if (!k) return;
+    if (e.type === "keydown") { if (!down.has(k)) hit.add(k); down.add(k); }
+    else down.delete(k);
+    if (["Space", "KeyW", "KeyA", "KeyS", "KeyD"].includes(e.code)) e.preventDefault();
+  };
+  const onMouse = e => {
+    if (e.type === "mousedown") { hit.add(e.button === 2 ? "aim" : "fire"); down.add(e.button === 2 ? "aim" : "fire"); dragging = true; lx = e.clientX; ly = e.clientY; }
+    if (e.type === "mouseup") { down.delete(e.button === 2 ? "aim" : "fire"); dragging = false; }
+    if (e.type === "mousemove") {
+      if (document.pointerLockElement === canvas) { lookX += e.movementX; lookY += e.movementY; }
+      else if (dragging) { lookX += (e.clientX - lx) * 2; lookY += (e.clientY - ly) * 2; lx = e.clientX; ly = e.clientY; }
+    }
+    if (e.type === "contextmenu") e.preventDefault();
+  };
+  const onWheel = e => { hit.add(e.deltaY < 0 ? "wheelUp" : "wheelDown"); };
+  canvas.addEventListener("click", () => { if (!locked) canvas.requestPointerLock?.(); });
+  document.addEventListener("pointerlockchange", () => { locked = document.pointerLockElement === canvas; });
+  addEventListener("keydown", onKey); addEventListener("keyup", onKey);
+  addEventListener("mousedown", onMouse); addEventListener("mouseup", onMouse);
+  addEventListener("mousemove", onMouse); addEventListener("wheel", onWheel);
+  canvas.addEventListener("contextmenu", onMouse);
+  // Intent snapshot for one tick. Edge presses live in `hit` until consumed.
+  return {
+    get locked() { return locked; },
+    pressed(k) { return hit.has(k); },
+    held(k) { return down.has(k); },
+    consume() { hit.clear(); },
+    look() { const r = { x: lookX, y: lookY }; lookX = 0; lookY = 0; return r; },
+    move() {
+      return {
+        x: (down.has("right") ? 1 : 0) - (down.has("left") ? 1 : 0),
+        y: (down.has("up") ? 1 : 0) - (down.has("down") ? 1 : 0),
+        sprint: down.has("sprint"), jump: down.has("jump"), aim: down.has("aim"),
+      };
+    },
+    // Gamepad: left stick move, A jump, RT fire, Start pause. Polled, no events.
+    pad() {
+      const p = navigator.getGamepads?.()[0];
+      if (!p) return null;
+      const dz = v => Math.abs(v) < 0.12 ? 0 : v;
+      return {
+        x: dz(p.axes[0] || 0), y: -dz(p.axes[1] || 0),
+        sprint: p.buttons[10]?.pressed, jump: p.buttons[0]?.pressed,
+        fire: p.buttons[7]?.value > 0.4, pause: p.buttons[9]?.pressed,
+      };
+    },
+  };
 }
-function onKeyUp(e) { keys.set(e.code, false); }
-function onMouseMove(e) {
-  if (locked) { mouseDX += e.movementX || 0; mouseDY += e.movementY || 0; }
-  else if (dragging) {
-    mouseDX += (e.clientX - lastDragX) * 1.4;
-    mouseDY += (e.clientY - lastDragY) * 1.4;
-    lastDragX = e.clientX;
-    lastDragY = e.clientY;
-  }
-}
-function onMouseDown(e) {
-  if (e.button === 0) mouseDown = true;
-  if (e.button === 2) rightDown = true;
-  if (!locked) { dragging = true; lastDragX = e.clientX; lastDragY = e.clientY; }
-}
-function onMouseUp(e) {
-  if (e.button === 0) mouseDown = false;
-  if (e.button === 2) rightDown = false;
-  dragging = false;
-}
-function onWheel(e) { wheelDelta += e.deltaY; }
-function onLockChange() { locked = document.pointerLockElement != null; }
-function onGamepad(e) { padIndex = e.gamepad.index; }
-export function inputAttach(canvas) {
-  if (attached || typeof window === "undefined") return;
-  attached = true;
-  window.addEventListener("keydown", onKeyDown);
-  window.addEventListener("keyup", onKeyUp);
-  window.addEventListener("mousemove", onMouseMove);
-  window.addEventListener("mousedown", onMouseDown);
-  window.addEventListener("mouseup", onMouseUp);
-  window.addEventListener("wheel", onWheel);
-  window.addEventListener("gamepadconnected", onGamepad);
-  document.addEventListener("pointerlockchange", onLockChange);
-  if (canvas) canvas.addEventListener("contextmenu", (e) => e.preventDefault());
-}
-export function inputUpdate() {
-  const snap = { dx: mouseDX, dy: mouseDY, wheel: wheelDelta, fire: mouseDown, aim: rightDown };
-  mouseDX = 0;
-  mouseDY = 0;
-  wheelDelta = 0;
-  return snap;
-}
-export function consumePressed() {
-  const out = new Set(pressed);
-  pressed.clear();
-  return out;
-}
-function pad() {
-  if (padIndex < 0 || typeof navigator === "undefined") return null;
-  const pads = navigator.getGamepads ? navigator.getGamepads() : [];
-  return pads && pads[padIndex] ? pads[padIndex] : null;
-}
-export function moveIntent() {
-  let x = 0;
-  let y = 0;
-  if (keys.get("KeyW")) y += 1;
-  if (keys.get("KeyS")) y -= 1;
-  if (keys.get("KeyA")) x -= 1;
-  if (keys.get("KeyD")) x += 1;
-  const gp = pad();
-  if (gp) {
-    x += gp.axes[0] || 0;
-    y -= gp.axes[1] || 0;
-  }
-  const len = Math.hypot(x, y);
-  if (len > 1) { x /= len; y /= len; }
-  return { x, y };
-}
-export function handbrake() {
-  const gp = pad();
-  return keys.get("Space") || (gp ? !!(gp.buttons[0] && gp.buttons[0].pressed) : false);
-}
-export function sprint() {
-  return !!(keys.get("ShiftLeft") || keys.get("ShiftRight"));
-}
-export function enterExitPressed() { return pressed.has("KeyE"); }
-export function punchPressed() { return mouseDown && !rightDown; }
-export function aimPressed() { return rightDown; }
-export function firePressed() { return mouseDown; }
-export function radioStep() {
-  if (!pressed.has("KeyQ")) return 0;
-  return 1;
-}
-export function pointerLockToggle(canvas) {
-  if (!canvas || typeof document === "undefined") return false;
-  if (document.pointerLockElement) { document.exitPointerLock(); return false; }
-  try { const p = canvas.requestPointerLock(); if (p && p.catch) p.catch(() => {}); return true; } catch (err) { return false; }
-}
-export function isPointerLocked() { return locked; }
-export function lookDelta() { const d = { dx: mouseDX, dy: mouseDY }; mouseDX = 0; mouseDY = 0; return d; }
-export function keyPressed(code) { return pressed.has(code); }
-export function keyHeld(code) { return keys.get(code) || false; }

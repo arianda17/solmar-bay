@@ -1,125 +1,86 @@
-import { mulberry32, hashSeed, DEFAULT_SEED } from "./sim.js";
-import { getRoadGraph } from "./roadgraph.js";
+// cityGenerator.js — seeded city: 6 districts, ~172 buildings + ~40 container
+// stacks, props, water mask, landmarks. Same seed -> identical city.
+// District table: [name, cx, cz, radius, count, minStories, maxStories, tint]
 export const DISTRICTS = [
-  { id: "port-lumen", name: "Port Lumen", minX: -350, maxX: 350, minZ: 500, maxZ: 920, density: 1.2, landmark: "Lumen Spire" },
-  { id: "brisa-yards", name: "Brisa Yards", minX: -1000, maxX: -350, minZ: 300, maxZ: 920, density: 0.6, landmark: "Yard 9 Crane" },
-  { id: "alto-mar", name: "Alto Mar", minX: -1000, maxX: -300, minZ: -1000, maxZ: 300, density: 0.8, landmark: "Mirador Crest" },
-  { id: "palmera-row", name: "Palmera Row", minX: 350, maxX: 1000, minZ: 500, maxZ: 920, density: 1.2, landmark: "Solmar Pier" },
-  { id: "cerro-verde", name: "Cerro Verde", minX: -300, maxX: 400, minZ: -1000, maxZ: 500, density: 1.0, landmark: "Mercado Verde" },
-  { id: "las-salinas", name: "Las Salinas", minX: 400, maxX: 1000, minZ: -1000, maxZ: 500, density: 0.5, landmark: "Salinas Water Tower" },
+  ["Port Lumen", 0, -620, 520, 46, 8, 22, 0x3f3a34],
+  ["Brisa Yards", -620, 300, 420, 22, 2, 6, 0x4c443a],
+  ["Alto Mar", 560, 420, 460, 38, 1, 4, 0x6b6055],
+  ["Palmera Row", 300, -760, 480, 26, 2, 8, 0x4a4136],
+  ["Cerro Verde", -80, 620, 420, 30, 2, 6, 0x57523f],
+  ["Las Salinas", -780, -480, 380, 10, 1, 3, 0x4a4a3c],
 ];
-export function districtFor(x, z) {
-  for (const d of DISTRICTS) {
-    if (x >= d.minX && x < d.maxX && z >= d.minZ && z < d.maxZ) return d;
-  }
-  return DISTRICTS[0];
-}
-export function buildRoadGraph(seed) {
-  return getRoadGraph(seed === undefined ? DEFAULT_SEED : seed);
-}
-const CHUNK = 250;
-export function generateChunk(cx, cz, seed) {
-  const sd = seed === undefined ? DEFAULT_SEED : seed;
-  const rng = mulberry32(hashSeed(sd, cx, cz));
-  const minX = cx * CHUNK;
-  const minZ = cz * CHUNK;
-  const buildings = [];
-  const lots = [];
-  const g = getRoadGraph(sd);
-  for (let i = 0; i < 26; i++) {
-    const x = minX + rng() * CHUNK;
-    const z = minZ + rng() * CHUNK;
-    if (z > 905) continue; // bay water, no lots
-    let nearRoad = false;
-    for (const e of g.edges) {
-      const a = g.nodeById.get(e.a);
-      const b = g.nodeById.get(e.b);
-      const dx = b.x - a.x;
-      const dz = b.z - a.z;
-      const len2 = dx * dx + dz * dz || 1;
-      let t = ((x - a.x) * dx + (z - a.z) * dz) / len2;
-      t = t < 0 ? 0 : t > 1 ? 1 : t;
-      const px = a.x + dx * t;
-      const pz = a.z + dz * t;
-      if (Math.hypot(px - x, pz - z) < 11) { nearRoad = true; break; }
+export const STORY_H = 3.4;
+export function generateCity(rng, graph) {
+  const buildings = [], props = { palms: [], lamps: [], hydrants: [], bins: [], parked: [], stalls: [], barriers: [], crates: [] };
+  const used = [];
+  const far = (x, z, r) => used.every(u => (u[0] - x) ** 2 + (u[1] - z) ** 2 > r * r);
+  let bi = 0;
+  for (const [name, cx, cz, rad, count, sMin, sMax, tint] of DISTRICTS) {
+    const mean = (sMin + sMax) / 2;
+    for (let i = 0; i < count; i++) {
+      let x = 0, z = 0, ok = false;
+      for (let t = 0; t < 24 && !ok; t++) {
+        const a = rng.next() * Math.PI * 2, r = Math.sqrt(rng.next()) * rad * 0.88;
+        x = cx + Math.cos(a) * r; z = cz + Math.sin(a) * r;
+        ok = far(x, z, 26) && Math.abs(x) < 980 && Math.abs(z) < 980;
+      }
+      if (!ok) continue;
+      used.push([x, z]);
+      const stories = Math.max(1, Math.round(mean * rng.range(0.7, 1.3)));
+      const spire = name === "Port Lumen" && i === 0; // Lumen Spire, 22 + beacon
+      const h = (spire ? 22 : stories) * STORY_H;
+      const w = rng.range(14, 26), d = rng.range(14, 26);
+      const b = {
+        id: bi++, district: name, x, z, w, d, h, stories: spire ? 22 : stories,
+        spire, lit: rng.next(), neon: (name === "Palmera Row" || name === "Port Lumen") && rng.chance(0.4),
+        awning: ["Port Lumen", "Palmera Row", "Cerro Verde"].includes(name) && rng.chance(0.6),
+        roof: h > 4 * STORY_H ? Math.floor(rng.next() * 3) + 1 : 0, tint,
+      };
+      buildings.push(b);
     }
-    if (nearRoad) continue;
-    const d = districtFor(x, z);
-    const lot = { x, z, w: 14 + rng() * 22, d: 14 + rng() * 22, district: d.id, rot: rng() * 0.2 - 0.1 };
-    lots.push(lot);
-    buildings.push(lotBuilding(lot, rng));
   }
-  return { cx, cz, seed: sd, lots, buildings, props: propsForChunk({ cx, cz, seed: sd, lots }), water: waterMask({ cx, cz }) };
-}
-export function lotBuilding(lot, rng) {
-  const d = DISTRICTS.find((x) => x.id === lot.district) || DISTRICTS[0];
-  let stories = 2 + Math.floor(rng() * 6);
-  if (d.id === "port-lumen") stories = 6 + Math.floor(rng() * 16);
-  if (d.id === "brisa-yards") stories = 1 + Math.floor(rng() * 2);
-  if (d.id === "las-salinas") stories = 1 + Math.floor(rng() * 2);
-  const palettes = {
-    "port-lumen": [0x9fb4c8, 0x7e93a8, 0xb8c4cc, 0x5f7d95],
-    "brisa-yards": [0x8a6f5c, 0x7a7d84, 0x9c8468, 0x6e5a4e],
-    "alto-mar": [0xe8dcc8, 0xd8c8b0, 0xc8b89a, 0xf0e6d4],
-    "palmera-row": [0xf2c9a0, 0xf7d9b0, 0xe8a88c, 0xf5e6c8],
-    "cerro-verde": [0xc8b49a, 0xb8a888, 0xd8c8a8, 0xa89a80],
-    "las-salinas": [0x9a8f7a, 0x8a8070, 0xa89a84, 0x7a6f60],
+  // Brisa Yards: ~40 container stacks around Solis Freight Depot (-620,300).
+  const containers = [];
+  for (let i = 0; i < 40; i++) {
+    const gx = -620 + (i % 8) * 16 - 56 + rng.range(-3, 3);
+    const gz = 300 + Math.floor(i / 8) * 14 - 28 + rng.range(-3, 3);
+    containers.push({ x: gx, z: gz, h: rng.pick([2.6, 2.6, 5.2]), c: rng.pick([0xb3402f, 0x2f6db3, 0x3f8f5f, 0xc8a03c]) });
+  }
+  // Props: seeded per district, snapped near roads (offsets from district centre).
+  const scatter = (arr, n, cx, cz, rad, minD) => {
+    for (let i = 0; i < n; i++) {
+      const a = rng.next() * Math.PI * 2, r = Math.sqrt(rng.next()) * rad;
+      const x = cx + Math.cos(a) * r, z = cz + Math.sin(a) * r;
+      if (Math.abs(x) > 980 || Math.abs(z) > 980) continue;
+      if (arr.every(p => (p.x - x) ** 2 + (p.z - z) ** 2 > minD * minD)) arr.push({ x, z, r: rng.next() });
+    }
   };
-  const pal = palettes[d.id] || palettes["port-lumen"];
+  scatter(props.palms, 24, 300, -760, 420, 12); // Palmera Row median/boardwalk
+  scatter(props.palms, 6, 0, -620, 400, 12);
+  scatter(props.lamps, 160, 0, 0, 950, 20); // arterials 20-25 m, others wider
+  scatter(props.hydrants, 44, 0, -500, 800, 60);
+  scatter(props.bins, 70, 0, 0, 900, 40);
+  scatter(props.parked, 100, 0, 0, 950, 40); // ~1 per 40-50 m, district-typed
+  scatter(props.stalls, 7, -80, 620, 120, 8); // Mercado Verde plaza
+  scatter(props.stalls, 5, 0, -620, 140, 8); // Tidewheel Promenade
+  scatter(props.barriers, 6, -620, 300, 160, 10); // depot + chop-shop alley
+  scatter(props.barriers, 3, -780, -480, 200, 10);
+  scatter(props.crates, 10, 300, -760, 200, 6); // pier crates (shot 3)
   return {
-    x: lot.x, z: lot.z, w: lot.w, d: lot.d, rot: lot.rot,
-    height: stories * 3.2,
-    stories,
-    color: pal[Math.floor(rng() * pal.length)],
-    district: d.id,
-    roof: rng() < 0.3 ? "flat-ac" : "flat",
-    litRatio: 0.25 + rng() * 0.45,
+    buildings, containers, props,
+    water: { z: -860, edge: -820 }, // bay edge: barrier 2 m offshore, seawall
+    landmarks: {
+      spire: buildings.find(b => b.spire) || buildings[0],
+      crane: { x: -560, z: 240, h: 42 }, // Yard 9 red gantry crane
+      pier: { x: 300, z: -860, len: 120 },
+      tower: { x: -780, z: -480, h: 26 }, // Salinas Water Tower
+      fountain: { x: -80, z: 620 }, // Old Tram Fountain
+      crest: { x: 560, z: 420, h: 18 }, // Mirador Crest
+    },
+    districtAt(x, z) {
+      let best = DISTRICTS[0], bd = 1e12;
+      for (const d of DISTRICTS) { const dd = (d[1] - x) ** 2 + (d[2] - z) ** 2; if (dd < bd) { bd = dd; best = d; } }
+      return best[0];
+    },
   };
-}
-export function buildingColliders(chunk) {
-  const out = [];
-  for (const b of chunk.buildings || []) {
-    const hw = b.w / 2;
-    const hd = b.d / 2;
-    out.push({ minX: b.x - hw, maxX: b.x + hw, minZ: b.z - hd, maxZ: b.z + hd, height: b.height, kind: "building" });
-  }
-  return out;
-}
-export function propsForChunk(chunk) {
-  const rng = mulberry32(hashSeed(chunk.seed, chunk.cx * 3 + 1, chunk.cz * 3 + 1));
-  const props = [];
-  const kinds = ["palm", "planter", "lamp", "bench", "hydrant", "sign", "container", "crate"];
-  for (let i = 0; i < 18; i++) {
-    const x = chunk.cx * CHUNK + rng() * CHUNK;
-    const z = chunk.cz * CHUNK + rng() * CHUNK;
-    if (z > 905) continue;
-    const d = districtFor(x, z);
-    let kind = kinds[Math.floor(rng() * kinds.length)];
-    if (d.id === "palmera-row" || d.id === "port-lumen") kind = rng() < 0.5 ? "palm" : kind;
-    if (d.id === "brisa-yards") kind = rng() < 0.5 ? "container" : kind;
-    props.push({ x, z, kind, rot: rng() * Math.PI * 2, scale: 0.8 + rng() * 0.6 });
-  }
-  return props;
-}
-export function waterMask(chunk) {
-  return chunk.cz * CHUNK + CHUNK > 905;
-}
-export function bridgeNeeded(x, z) {
-  if (x > 400 && x < 700 && z > -60 && z < 60) return { x: 550, z: 0, kind: "rust-gate" };
-  return null;
-}
-export function spawnPointForDistrict(district) {
-  const d = typeof district === "string"
-    ? DISTRICTS.find((x) => x.id === district || x.name === district)
-    : district;
-  const target = d || DISTRICTS[0];
-  const spots = {
-    "port-lumen": { x: 0, y: 0, z: 700, heading: Math.PI },
-    "brisa-yards": { x: -650, y: 0, z: 600, heading: 0 },
-    "alto-mar": { x: -650, y: 0, z: -500, heading: Math.PI / 2 },
-    "palmera-row": { x: 650, y: 0, z: 700, heading: Math.PI },
-    "cerro-verde": { x: 0, y: 0, z: -200, heading: 0 },
-    "las-salinas": { x: 700, y: 0, z: -300, heading: -Math.PI / 2 },
-  };
-  return spots[target.id] || spots["port-lumen"];
 }
